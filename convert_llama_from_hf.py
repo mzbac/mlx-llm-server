@@ -7,9 +7,11 @@ import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 import torch
-from llama import Llama, ModelArgs
 from mlx.utils import tree_flatten, tree_map, tree_unflatten
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from llm.llama.config import ModelArgs
+from llm.llama.llama import Llama
 
 
 def quantize(weights, config, args):
@@ -44,28 +46,14 @@ def convert(args):
     config = model.config.to_dict()
 
     state_dict = model.state_dict()
-    tokenizer = AutoTokenizer.from_pretrained(str(hf_path))
+    if args.disable_fast_tokenizer:
+        tokenizer = AutoTokenizer.from_pretrained(str(hf_path), use_fast=False)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(str(hf_path))
 
     state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
 
     weights = {k: mx.array(v.numpy(), mx.bfloat16) for k, v in state_dict.items()}
-
-    keep_keys = set(
-        [
-            "vocab_size",
-            "hidden_size",
-            "num_attention_heads",
-            "num_hidden_layers",
-            "num_key_value_heads" "max_position_embeddings",
-            "rms_norm_eps",
-            "intermediate_size",
-            "rope_theta",
-            "rope_scaling",
-        ]
-    )
-    for k in list(config.keys()):
-        if k not in keep_keys:
-            config.pop(k)
 
     return weights, config, tokenizer
 
@@ -81,6 +69,12 @@ if __name__ == "__main__":
         type=str,
         default="mlx_model",
         help="The path to save the MLX model.",
+    )
+    parser.add_argument(
+        "--disable-fast-tokenizer",
+        "-dft",
+        action="store_true",
+        help="Disable the fast tokenizer",
     )
     parser.add_argument(
         "-q",

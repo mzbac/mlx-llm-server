@@ -1,3 +1,5 @@
 torch
 mlx
 transformers>=4.35
+tqdm
+requests

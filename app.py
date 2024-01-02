@@ -5,7 +5,7 @@ from transformers import AutoTokenizer
 from mlx.utils import tree_unflatten
 import mlx.core as mx
 import mlx.nn as nn
-from llm.llama import Llama, ModelArgs
+from llm.llama.llama import Llama, ModelArgs
 
 
 def generate(
@@ -28,7 +28,7 @@ def generate(
         yield y
 
 
-def load_model(model_path: str):
+def load_model(model_path: str, disable_fast_tokenizer:bool):
     model_path = Path(model_path)
     with open(model_path / "config.json", "r") as f:
         config = json.load(f)
@@ -42,9 +42,14 @@ def load_model(model_path: str):
         nn.QuantizedLinear.quantize_module(model, **quantization)
     model.update(tree_unflatten(list(weights.items())))
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_path
+    if disable_fast_tokenizer:
+        tokenizer = AutoTokenizer.from_pretrained(
+        model_path, use_fast=False
     )
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_path
+        )
     return model, tokenizer
 
 
@@ -59,7 +64,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--prompt",
         help="The message to be processed by the model",
-        default="[INST] hello [/INST]",
+        default="hello",
+    )
+    parser.add_argument(
+        "--disable-fast-tokenizer",
+        "-dft",
+        action="store_true",
+        help="Disable the fast tokenizer",
     )
     parser.add_argument(
         "--max-tokens",
@@ -79,7 +90,7 @@ if __name__ == "__main__":
 
     mx.random.seed(args.seed)
 
-    model, tokenizer = load_model(args.model_path)
+    model, tokenizer = load_model(args.model_path, args.disable_fast_tokenizer)
 
     prompt = tokenizer(
         args.prompt,

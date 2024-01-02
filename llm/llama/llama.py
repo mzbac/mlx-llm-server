@@ -1,27 +1,51 @@
-from dataclasses import dataclass
-from typing import TypedDict, Optional, Tuple
-
+from typing import Optional, Tuple
+import math
 import mlx.core as mx
 import mlx.nn as nn
 
-
-class RopeScaling(TypedDict):
-    factor: float
-    type: str
+from .config import ModelArgs
 
 
-@dataclass
-class ModelArgs:
-    hidden_size: int = 4096
-    num_attention_heads: int = 32
-    num_hidden_layers: int = 32
-    num_key_value_heads: int = 32
-    max_position_embeddings: int = 4096
-    rms_norm_eps: float = 1e-5
-    intermediate_size: int = 11008
-    vocab_size: int = 32000
-    rope_theta: int = 10000
-    rope_scaling: RopeScaling = None
+class LinearScalingRoPE(nn.RoPE):
+    def __init__(
+        self, dims: int, rope_scaling_factor: float = 4.0, base: float = 10000
+    ):
+        super().__init__(dims)
+        self.base = base
+        self.rope_scaling_factor = rope_scaling_factor
+
+    def __call__(self, x, offset: int = 0):
+        shape = x.shape
+        x = mx.reshape(x, (-1, shape[-2], shape[-1]))
+        N = x.shape[1] + offset
+        costheta, sintheta = LinearScalingRoPE.create_cos_sin_theta(
+            N,
+            self.dims,
+            offset=offset,
+            base=self.base,
+            rope_scaling_factor=self.rope_scaling_factor,
+            dtype=x.dtype,
+        )
+
+        rx = self._compute_rope(costheta, sintheta, x)
+
+        return mx.reshape(rx, shape)
+
+    @staticmethod
+    def create_cos_sin_theta(
+        N: int,
+        D: int,
+        offset: int = 0,
+        base: float = 10000,
+        rope_scaling_factor: float = 1.0,
+        dtype=mx.float32,
+    ):
+        D = D // 2
+        positions = mx.arange(offset, N, dtype=dtype)
+        positions = positions / rope_scaling_factor
+        freqs = mx.exp(-mx.arange(0.0, D, dtype=dtype) * (math.log(base) / D))
+        theta = mx.reshape(positions, (-1, 1)) * mx.reshape(freqs, (1, -1))
+        return mx.cos(theta), mx.sin(theta)
 
 
 class RMSNorm(nn.Module):
@@ -75,8 +99,15 @@ class Attention(nn.Module):
         self.o_proj = nn.Linear(
             args.num_attention_heads * self.head_dim, args.hidden_size, bias=False
         )
-
-        self.rope = nn.RoPE(self.head_dim, traditional=False, base=args.rope_theta)
+        if args.rope_scaling is None:
+            self.rope = nn.RoPE(self.head_dim, traditional=False, base=args.rope_theta)
+        else:
+            scaling_factor = args.rope_scaling.get("factor", 1.0)
+            self.rope = LinearScalingRoPE(
+                self.head_dim,
+                rope_scaling_factor=scaling_factor,
+                base=args.rope_theta,
+            )
 
     def __call__(
         self,
