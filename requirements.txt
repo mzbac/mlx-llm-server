@@ -3,3 +3,6 @@ mlx
 transformers>=4.35
 tqdm
 requests
+fastapi
+uvicorn[standard]
+sse_starlette

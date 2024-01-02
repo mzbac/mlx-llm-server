@@ -82,4 +82,10 @@ python download.py mzbac/mlx-deepseek-coder-6.7b-instruct-4-bit
 ```
 python inference.py --model-path models/mzbac/mlx-deepseek-coder-6.7b-instruct-4-bit --prompt "### Instruction: \nwrite a quick sort algorithm in python.\n### Response: \n"
 ```
+3. **Serve the model as Openai completions API**:
+
+```
+python -m server --model-path ./models/mzbac/mlx-deepseek-coder-6.7b-instruct-4-bit
+```
+
 ** Note: ** More converted mlx models can be found [here](https://huggingface.co/mzbac).
