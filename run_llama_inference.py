@@ -28,7 +28,7 @@ def generate(
         yield y
 
 
-def load_model(model_path: str, disable_fast_tokenizer:bool):
+def load_model(model_path: str, disable_fast_tokenizer: bool):
     model_path = Path(model_path)
     with open(model_path / "config.json", "r") as f:
         config = json.load(f)
@@ -43,13 +43,9 @@ def load_model(model_path: str, disable_fast_tokenizer:bool):
     model.update(tree_unflatten(list(weights.items())))
 
     if disable_fast_tokenizer:
-        tokenizer = AutoTokenizer.from_pretrained(
-        model_path, use_fast=False
-    )
+        tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
     else:
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_path
-        )
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
     return model, tokenizer
 
 
