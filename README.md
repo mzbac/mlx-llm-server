@@ -58,16 +58,16 @@ Note: the model will be downloaded to the `models` directory
 
 To execute inference using an MLX model, the following command can be used:
 ```
-python run_llama_inference.py --model-path <path_to_mlx_model> --prompt <prompt>
+python inference.py --model-path <path_to_mlx_model> --prompt <prompt>
 ```
 
 For more information on available options:
 
 ```
-python run_llama_inference.py --help
+python inference.py --help
 ```
 
-## Concrete Example: Using `mzbac/mlx-deepseek-coder-6.7b-instruct-4-bit`
+## Example: Using `mzbac/mlx-deepseek-coder-6.7b-instruct-4-bit`
 
 This section provides a step-by-step guide on how to download and run the `mzbac/mlx-deepseek-coder-6.7b-instruct-4-bit` model.
 
@@ -80,5 +80,6 @@ python download.py --model-name mzbac/mlx-deepseek-coder-6.7b-instruct-4-bit
 2. **Run the Model**:
 
 ```
-python run_llama_inference.py --model-path models/mzbac/mlx-deepseek-coder-6.7b-instruct-4-bit --prompt "### Instruction: \nwrite a quick sort algorithm in python.\n### Response: \n"
+python inference.py --model-path models/mzbac/mlx-deepseek-coder-6.7b-instruct-4-bit --prompt "### Instruction: \nwrite a quick sort algorithm in python.\n### Response: \n"
 ```
+** Note: ** More converted mlx models can be found [here](https://huggingface.co/mzbac).
