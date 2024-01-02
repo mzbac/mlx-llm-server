@@ -74,7 +74,7 @@ This section provides a step-by-step guide on how to download and run the `mzbac
 1. **Download the Model**:
 
 ```
-python download.py --model-name mzbac/mlx-deepseek-coder-6.7b-instruct-4-bit
+python download.py mzbac/mlx-deepseek-coder-6.7b-instruct-4-bit
 ```
 
 2. **Run the Model**:
