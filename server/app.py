@@ -74,34 +74,19 @@ def is_stop_condition_met(
     stop_id_sequences: List[np.ndarray],
     eos_token_id: int,
     max_tokens: int,
-) -> Tuple[bool, bool]:
-    """
-    Determines if the token generation should stop based on various conditions.
-
-    Args:
-    - tokens: List of generated token IDs.
-    - stop_id_sequences: List of token ID sequences that trigger a stop.
-    - eos_token_id: Token ID indicating the end of a sequence.
-    - max_tokens: Maximum number of tokens to generate.
-
-    Returns:
-    - A tuple (stop_met, trim_needed) where:
-      - stop_met (bool): True if the stop condition is met, False otherwise.
-      - trim_needed (bool): True if the generated tokens need to be trimmed, False otherwise.
-    """
-
+) -> Tuple[bool, bool, int]:
     if len(tokens) >= max_tokens:
-        return True, False
+        return True, False, 0
 
     if tokens and tokens[-1] == eos_token_id:
-        return True, True
+        return True, True, 1
 
     for stop_ids in stop_id_sequences:
         if len(tokens) >= len(stop_ids):
             if np.all(np.equal(np.array(tokens[-len(stop_ids) :]), stop_ids)):
-                return True, True
+                return True, True, len(stop_ids)
 
-    return False, False
+    return False, False, 0
 
 
 def generate(
@@ -129,17 +114,12 @@ def generate(
         token = y.item()
         tokens.append(token)
 
-        stop_met, trim_needed = is_stop_condition_met(
+        stop_met, trim_needed, trim_length = is_stop_condition_met(
             tokens, stop_id_sequences, eos_token_id, max_tokens
         )
         if stop_met:
-            if trim_needed:
-                if stop_id_sequences:
-                    tokens = tokens[
-                        : -len(stop_id_sequences[0])
-                    ]  # Trim the stop sequence
-                else:
-                    tokens.pop()  # Remove the last token (EOS)
+            if trim_needed and trim_length > 0:
+                tokens = tokens[:-trim_length]
             break
 
         yield token
@@ -186,6 +166,7 @@ def create_app(model_path: str, disable_fast_tokenizer: bool):
         body: ChatCompletionRequest,
         model: Llama = Depends(get_llama_model),
     ):
+        print(body)
         chat_id = f"chatcmpl-{uuid.uuid4()}"
         prompt = convert_chat(body.messages, body.role_mapping)
         prompt = tokenizer(
