@@ -1,6 +1,6 @@
 from ast import List
 from typing import List, Optional, Union
-from typing_extensions import TypedDict, Literal
+from typing_extensions import Literal, TypedDict, NotRequired
 from pydantic import BaseModel, Field
 
 
@@ -41,3 +41,54 @@ class ChatCompletionRequest(BaseModel):
     response_format: Optional[ChatCompletionRequestResponseFormat] = Field(
         default=None,
     )
+
+
+class CompletionUsage(TypedDict):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+class ChatCompletionResponseMessage(TypedDict):
+    content: Optional[str]
+    role: Literal["assistant"]
+
+
+class ChatCompletionResponseChoice(TypedDict):
+    index: int
+    message: "ChatCompletionResponseMessage"
+    finish_reason: Optional[str]
+
+
+class CreateChatCompletionResponse(TypedDict):
+    id: str
+    object: Literal["chat.completion"]
+    created: int
+    model: str
+    choices: List["ChatCompletionResponseChoice"]
+    usage: CompletionUsage
+
+
+class ChatCompletionStreamResponseDeltaEmpty(TypedDict):
+    pass
+
+
+class ChatCompletionStreamResponseDelta(TypedDict):
+    content: NotRequired[str]
+    role: NotRequired[Literal["system", "user", "assistant", "tool"]]
+
+
+class ChatCompletionStreamResponseChoice(TypedDict):
+    index: int
+    delta: Union[
+        ChatCompletionStreamResponseDelta, ChatCompletionStreamResponseDeltaEmpty
+    ]
+    finish_reason: Optional[Literal["stop", "length"]]
+
+
+class CreateChatCompletionStreamResponse(TypedDict):
+    id: str
+    model: str
+    object: Literal["chat.completion.chunk"]
+    created: int
+    choices: List[ChatCompletionStreamResponseChoice]

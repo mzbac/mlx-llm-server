@@ -1,5 +1,6 @@
 import argparse
 import uvicorn
+import os
 
 from server.app import create_app
 
@@ -19,4 +20,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     app = create_app(args.model_path, args.disable_fast_tokenizer)
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(
+        app,
+        host=os.getenv("HOST", "127.0.0.1"),
+        port=int(os.getenv("PORT", 8080)),
+    )

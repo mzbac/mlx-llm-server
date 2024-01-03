@@ -3,7 +3,13 @@ import time
 from typing import Optional
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from .types import ChatCompletionRequest, CompletionRequestMessage
+from .types import (
+    ChatCompletionRequest,
+    CompletionRequestMessage,
+    CompletionUsage,
+    CreateChatCompletionResponse,
+    CreateChatCompletionStreamResponse,
+)
 from sse_starlette.sse import EventSourceResponse
 from pathlib import Path
 import json
@@ -114,7 +120,7 @@ def create_app(model_path: str, disable_fast_tokenizer: bool):
 
     @app.post("/v1/chat/completions")
     async def chat_completions(
-        request: Request,
+        _: Request,
         body: ChatCompletionRequest,
         model: Llama = Depends(get_llama_model),
     ):
@@ -130,19 +136,19 @@ def create_app(model_path: str, disable_fast_tokenizer: bool):
 
             async def event_generator():
                 for token, _ in zip(
-                    generate(prompt, model, 0.6),
+                    generate(prompt, model, body.temperature),
                     range(body.max_tokens),
                 ):
                     if token == tokenizer.eos_token_id:
                         break
                     s = tokenizer.decode(token.item())
-                    response = {
-                        "id": chat_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": "your-model-name",
-                        "system_fingerprint": f"fp_{uuid.uuid4()}",
-                        "choices": [
+                    response = CreateChatCompletionStreamResponse(
+                        id=chat_id,
+                        object="chat.completion.chunk",
+                        created=int(time.time()),
+                        model="gpt-3.5-turbo",
+                        system_fingerprint=f"fp_{uuid.uuid4()}",
+                        choices=[
                             {
                                 "index": 0,
                                 "delta": {"role": "assistant", "content": s},
@@ -150,35 +156,41 @@ def create_app(model_path: str, disable_fast_tokenizer: bool):
                                 "finish_reason": None,
                             }
                         ],
-                    }
+                    )
+
                     yield f"{json.dumps(response)}"
 
             return EventSourceResponse(event_generator())
         else:
             tokens = []
             for token, _ in zip(
-                generate(prompt, model, 0.6),
+                generate(prompt, model, body.temperature),
                 range(body.max_tokens),
             ):
                 if token == tokenizer.eos_token_id:
                     break
                 tokens.append(token.item())
             s = tokenizer.decode(tokens)
-            response = {
-                "id": chat_id,
-                "object": "chat.completion",
-                "created": int(time.time()),
-                "model": "your-model-name",
-                "system_fingerprint": f"fp_{uuid.uuid4()}",
-                "choices": [
+            response = CreateChatCompletionResponse(
+                id=chat_id,
+                object="chat.completion",
+                created=int(time.time()),
+                model="gpt-3.5-turbo",
+                system_fingerprint=f"fp_{uuid.uuid4()}",
+                choices=[
                     {
                         "index": 0,
-                        "delta": {"role": "assistant", "content": s},
+                        "message": {"role": "assistant", "content": s},
                         "logprobs": None,
                         "finish_reason": None,
                     }
                 ],
-            }
+                usage=CompletionUsage(
+                    prompt_tokens=len(prompt),
+                    completion_tokens=len(tokens),
+                    total_tokens=len(prompt) + len(tokens),
+                ),
+            )
             return f"{json.dumps(response)}"
 
     return app
