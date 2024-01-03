@@ -1,5 +1,5 @@
 from ast import List
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 from typing_extensions import Literal, TypedDict, NotRequired
 from pydantic import BaseModel, Field
 
@@ -15,6 +15,14 @@ class CompletionRequestMessage(BaseModel):
 
 class ChatCompletionRequestResponseFormat(TypedDict):
     type: Literal["text", "json_object"]
+
+
+class RoleMapping(TypedDict):
+    system_prompt: str
+    system: str
+    user: str
+    assistant: str
+    stop: str
 
 
 class ChatCompletionRequest(BaseModel):
@@ -40,6 +48,12 @@ class ChatCompletionRequest(BaseModel):
 
     response_format: Optional[ChatCompletionRequestResponseFormat] = Field(
         default=None,
+    )
+
+    # custom fields
+    role_mapping: Optional[RoleMapping] = Field(
+        default=None,
+        description="A dictionary mapping roles to their respective prefixes in the chat.",
     )
 
 

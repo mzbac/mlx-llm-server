@@ -145,21 +145,26 @@ def generate(
         yield token
 
 
-def convert_chat(messages: CompletionRequestMessage):
-    # TODO change the hardcoded mapping
+def convert_chat(
+    messages: CompletionRequestMessage, role_mapping: Optional[dict] = None
+):
+    default_role_mapping = {
+        "system_prompt": "A chat between a curious user and an artificial intelligence assistant. The assistant follows the given rules no matter what.",
+        "system": "ASSISTANT's RULE: ",
+        "user": "USER: ",
+        "assistant": "ASSISTANT: ",
+        "stop": "\n",
+    }
+    role_mapping = role_mapping if role_mapping is not None else default_role_mapping
+
     prompt = ""
-    system = ""
-    user = "### Instruction: "
-    assistant = "### Response: "
     for line in messages:
-        if line.role == "system":
-            prompt += f"{system}{line.content}\n"
-        if line.role == "user":
-            prompt += f"{user}{line.content}\n"
-        if line.role == "assistant":
-            prompt += f"{assistant}{line.content}\n"
-    prompt += assistant.rstrip()
-    return prompt
+        role_prefix = role_mapping.get(line.role, "")
+        stop = role_mapping.get("stop", "")
+        prompt += f"{role_prefix}{line.content}{stop}"
+
+    prompt += role_mapping.get("assistant", "")
+    return prompt.rstrip()
 
 
 def create_app(model_path: str, disable_fast_tokenizer: bool):
@@ -182,11 +187,14 @@ def create_app(model_path: str, disable_fast_tokenizer: bool):
         model: Llama = Depends(get_llama_model),
     ):
         chat_id = f"chatcmpl-{uuid.uuid4()}"
+        prompt = convert_chat(body.messages, body.role_mapping)
         prompt = tokenizer(
-            convert_chat(body.messages),
+            prompt,
             return_tensors="np",
             return_attention_mask=False,
-        )["input_ids"][0]
+        )[
+            "input_ids"
+        ][0]
         prompt = mx.array(prompt)
         stop_words = body.stop if body.stop else []
         stop_words = [stop_words] if isinstance(stop_words, str) else stop_words
