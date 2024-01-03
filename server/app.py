@@ -210,8 +210,6 @@ def create_app(model_path: str, disable_fast_tokenizer: bool):
                     eos_token_id,
                     max_tokens,
                 ):
-                    if token == tokenizer.eos_token_id:
-                        break
                     s = tokenizer.decode(token)
                     response = CreateChatCompletionStreamResponse(
                         id=chat_id,
