@@ -120,6 +120,7 @@ def generate(
         if stop_met:
             if trim_needed and trim_length > 0:
                 tokens = tokens[:-trim_length]
+            tokens = None
             break
 
         yield token
@@ -166,7 +167,6 @@ def create_app(model_path: str, disable_fast_tokenizer: bool):
         body: ChatCompletionRequest,
         model: Llama = Depends(get_llama_model),
     ):
-        print(body)
         chat_id = f"chatcmpl-{uuid.uuid4()}"
         prompt = convert_chat(body.messages, body.role_mapping)
         prompt = tokenizer(
