@@ -1,5 +1,7 @@
+from threading import Lock
 import time
-from fastapi import FastAPI, Request
+from typing import Optional
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from .types import ChatCompletionRequest, CompletionRequestMessage
 from sse_starlette.sse import EventSourceResponse
@@ -11,6 +13,32 @@ from mlx.utils import tree_unflatten
 import mlx.core as mx
 import mlx.nn as nn
 from llm.llama.llama import Llama, ModelArgs
+
+_llama_model: Optional[Llama] = None
+
+llama_outer_lock = Lock()
+llama_inner_lock = Lock()
+
+
+def set_llama_model(model: Llama):
+    global _llama_model
+    _llama_model = model
+
+
+def get_llama_model():
+    llama_outer_lock.acquire()
+    release_outer_lock = True
+    try:
+        llama_inner_lock.acquire()
+        try:
+            llama_outer_lock.release()
+            release_outer_lock = False
+            yield _llama_model
+        finally:
+            llama_inner_lock.release()
+    finally:
+        if release_outer_lock:
+            llama_outer_lock.release()
 
 
 def load_model(model_path: str, disable_fast_tokenizer: bool):
@@ -73,6 +101,7 @@ def convert_chat(messages: CompletionRequestMessage):
 
 def create_app(model_path: str, disable_fast_tokenizer: bool):
     model, tokenizer = load_model(model_path, disable_fast_tokenizer)
+    set_llama_model(model)
     app = FastAPI()
 
     app.add_middleware(
@@ -84,7 +113,11 @@ def create_app(model_path: str, disable_fast_tokenizer: bool):
     )
 
     @app.post("/v1/chat/completions")
-    async def chat_completions(request: Request, body: ChatCompletionRequest):
+    async def chat_completions(
+        request: Request,
+        body: ChatCompletionRequest,
+        model: Llama = Depends(get_llama_model),
+    ):
         chat_id = f"chatcmpl-{uuid.uuid4()}"
         prompt = tokenizer(
             convert_chat(body.messages),
