@@ -1,4 +1,13 @@
 from dataclasses import dataclass
+import mlx.core as mx
+
+import torch
+
+dtype_dict = {
+    "float16": mx.float16,
+    "float32": mx.float32,
+    "bfloat16": mx.bfloat16,
+}
 
 
 class ModelArgs:
@@ -16,6 +25,7 @@ class ModelArgs:
         rms_norm_eps=1e-6,
         rope_theta=10000.0,
         rope_scaling=None,
+        torch_dtype=torch.get_default_dtype(),
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -34,8 +44,19 @@ class ModelArgs:
         self.rms_norm_eps = rms_norm_eps
         self.rope_theta = rope_theta
         self.rope_scaling = rope_scaling
+        self.torch_dtype = torch_dtype
         self._rope_scaling_validation()
-    
+
+        # custom fields
+        self.mlx_dtype = self._get_default_dtype()
+
+    def _get_default_dtype(self):
+        return (
+            dtype_dict[self.torch_dtype]
+            if self.torch_dtype in dtype_dict
+            else mx.float32
+        )
+
     def _rope_scaling_validation(self):
         """
         Validate the `rope_scaling` configuration.

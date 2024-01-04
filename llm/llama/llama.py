@@ -8,44 +8,42 @@ from .config import ModelArgs
 
 class LinearScalingRoPE(nn.RoPE):
     def __init__(
-        self, dims: int, rope_scaling_factor: float = 4.0, base: float = 10000
+        self,
+        dims: int,
+        max_position_embeddings: int = 2048,
+        rope_scaling_factor: float = 1.0,
+        base: float = 10000,
+        dtype=mx.float32,
     ):
         super().__init__(dims)
         self.base = base
         self.rope_scaling_factor = rope_scaling_factor
 
+        # according to the paper, the head dimension should be even
+        assert dims % 2 == 0, "dims must be divisble by 2"
+
+        D = dims // 2
+        self.freqs = mx.exp(-mx.arange(0.0, D, dtype=dtype) * (math.log(self.base) / D))
+        self._set_cos_sin_cache(max_position_embeddings, dtype=dtype)
+
     def __call__(self, x, offset: int = 0):
         shape = x.shape
         x = mx.reshape(x, (-1, shape[-2], shape[-1]))
         N = x.shape[1] + offset
-        costheta, sintheta = LinearScalingRoPE.create_cos_sin_theta(
-            N,
-            self.dims,
-            offset=offset,
-            base=self.base,
-            rope_scaling_factor=self.rope_scaling_factor,
-            dtype=x.dtype,
-        )
+        if N > self.max_seq_len_cached:
+            self._set_cos_sin_cache(seq_len=N, dtype=x.dtype)
 
-        rx = self._compute_rope(costheta, sintheta, x)
+        rx = self._compute_rope(self.costheta[offset:N], self.sintheta[offset:N], x)
 
         return mx.reshape(rx, shape)
 
-    @staticmethod
-    def create_cos_sin_theta(
-        N: int,
-        D: int,
-        offset: int = 0,
-        base: float = 10000,
-        rope_scaling_factor: float = 1.0,
-        dtype=mx.float32,
-    ):
-        D = D // 2
-        positions = mx.arange(offset, N, dtype=dtype)
-        positions = positions / rope_scaling_factor
-        freqs = mx.exp(-mx.arange(0.0, D, dtype=dtype) * (math.log(base) / D))
-        theta = mx.reshape(positions, (-1, 1)) * mx.reshape(freqs, (1, -1))
-        return mx.cos(theta), mx.sin(theta)
+    def _set_cos_sin_cache(self, seq_len: int, dtype=mx.float32):
+        self.max_seq_len_cached = seq_len
+        positions = mx.arange(0, self.max_seq_len_cached, dtype=dtype)
+        positions = positions / self.rope_scaling_factor
+        theta = mx.reshape(positions, (-1, 1)) * mx.reshape(self.freqs, (1, -1))
+        self.costheta = mx.cos(theta)
+        self.sintheta = mx.sin(theta)
 
 
 class RMSNorm(nn.Module):
@@ -105,8 +103,10 @@ class Attention(nn.Module):
             scaling_factor = args.rope_scaling.get("factor", 1.0)
             self.rope = LinearScalingRoPE(
                 self.head_dim,
+                max_position_embeddings=args.max_position_embeddings,
                 rope_scaling_factor=scaling_factor,
                 base=args.rope_theta,
+                dtype=args.mlx_dtype,
             )
 
     def __call__(
