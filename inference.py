@@ -17,7 +17,18 @@ def generate(
         if temp == 0:
             return mx.argmax(logits, axis=-1)
         else:
-            return mx.random.categorical(logits * (1 / temp))
+            probs = mx.softmax(logits / temp, axis=-1)
+
+            sorted_probs = mx.sort(probs)[::-1]
+            sorted_indices = mx.argsort(probs)[::-1]
+            cumulative_probs = mx.cumsum(sorted_probs, axis=-1)
+
+            top_probs = mx.where(
+                cumulative_probs > 0.95, sorted_probs, mx.zeros_like(sorted_probs)
+            )
+            sorted_tok = mx.random.categorical(mx.log(top_probs))
+            tok = sorted_indices.squeeze(0)[sorted_tok]
+            return tok
 
     y = prompt
     cache = None

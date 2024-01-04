@@ -31,7 +31,9 @@ class LinearScalingRoPE(nn.RoPE):
         x = mx.reshape(x, (-1, shape[-2], shape[-1]))
         N = x.shape[1] + offset
         if N > self.max_seq_len_cached:
-            self._set_cos_sin_cache(seq_len=N, dtype=x.dtype)
+            self._set_cos_sin_cache(
+                seq_len=N, dtype=x.dtype
+            )  # in case the default max_position_embeddings is incorret, make sure the backward compatibility
 
         rx = self._compute_rope(self.costheta[offset:N], self.sintheta[offset:N], x)
 
