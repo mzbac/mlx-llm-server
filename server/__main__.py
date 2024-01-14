@@ -12,14 +12,8 @@ if __name__ == "__main__":
         type=str,
         help="The path to the mlx model weights, tokenizer, and config",
     )
-    parser.add_argument(
-        "--disable-fast-tokenizer",
-        "-dft",
-        action="store_true",
-        help="Disable the fast tokenizer",
-    )
     args = parser.parse_args()
-    app = create_app(args.model_path, args.disable_fast_tokenizer)
+    app = create_app(args.model_path)
     uvicorn.run(
         app,
         host=os.getenv("HOST", "127.0.0.1"),

@@ -11,23 +11,20 @@ from .types import (
     CreateChatCompletionStreamResponse,
 )
 from sse_starlette.sse import EventSourceResponse
-from pathlib import Path
 import json
 import uuid
-from transformers import AutoTokenizer
-from mlx.utils import tree_unflatten
 import mlx.core as mx
 import mlx.nn as nn
-from llm.llama.llama import Llama, ModelArgs
 import numpy as np
+from mlx_lm import load
 
-_llama_model: Optional[Llama] = None
+_llama_model: Optional[nn.Module] = None
 
 llama_outer_lock = Lock()
 llama_inner_lock = Lock()
 
 
-def set_llama_model(model: Llama):
+def set_llama_model(model: nn.Module):
     global _llama_model
     _llama_model = model
 
@@ -46,28 +43,6 @@ def get_llama_model():
     finally:
         if release_outer_lock:
             llama_outer_lock.release()
-
-
-def load_model(model_path: str, disable_fast_tokenizer: bool):
-    model_path = Path(model_path)
-    with open(model_path / "config.json", "r") as f:
-        config = json.load(f)
-        config.pop("model_type")
-        quantization = config.pop("quantization", None)
-        model_args = ModelArgs(**config)
-
-    model = Llama(model_args)
-    weights = mx.load(str(model_path / "weights.npz"))
-    if quantization is not None:
-        nn.QuantizedLinear.quantize_module(model, **quantization)
-    model.update(tree_unflatten(list(weights.items())))
-
-    if disable_fast_tokenizer:
-        tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
-    else:
-        tokenizer = AutoTokenizer.from_pretrained(model_path)
-    return model, tokenizer
-
 
 def is_stop_condition_met(
     tokens: List[int],
@@ -88,10 +63,9 @@ def is_stop_condition_met(
 
     return False, False, 0
 
-
 def generate(
     prompt: mx.array,
-    model: Llama,
+    model: nn.Module,
     temp: float = 0.0,
     stop_id_sequences: List[np.ndarray] = None,
     eos_token_id: int = None,
@@ -125,7 +99,6 @@ def generate(
 
         yield token
 
-
 def convert_chat(
     messages: CompletionRequestMessage, role_mapping: Optional[dict] = None
 ):
@@ -148,8 +121,8 @@ def convert_chat(
     return prompt.rstrip()
 
 
-def create_app(model_path: str, disable_fast_tokenizer: bool):
-    model, tokenizer = load_model(model_path, disable_fast_tokenizer)
+def create_app(model_path: str):
+    model, tokenizer = load(model_path)
     set_llama_model(model)
     app = FastAPI()
 
@@ -165,7 +138,7 @@ def create_app(model_path: str, disable_fast_tokenizer: bool):
     async def chat_completions(
         _: Request,
         body: ChatCompletionRequest,
-        model: Llama = Depends(get_llama_model),
+        model = Depends(get_llama_model),
     ):
         chat_id = f"chatcmpl-{uuid.uuid4()}"
         prompt = convert_chat(body.messages, body.role_mapping)
