@@ -9,8 +9,7 @@ This guide will help you set up the MLX-LLM server to serve the model as an Open
 ```bash
 python -m server --model-path <path-to-your-model>
 ```
-
-Replace <path-to-your-model> with the actual path to your MLX-LLM model. This will start the server and expose the MLX-LLM model as an API.
+The MLX-LLM server can serve both Hugging Face format models and quantized MLX models. You can find these models at the [MLX Community on Hugging Face](https://huggingface.co/mlx-community).
 
 ## Setup Guide
 ### Miniconda Installation
@@ -56,4 +55,3 @@ curl http://localhost:8080/v1/chat/completions \
 ]
 }'
 ```
-
