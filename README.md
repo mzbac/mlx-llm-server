@@ -4,10 +4,17 @@ This guide will help you set up the MLX-LLM server to serve the model as an Open
 
 ## Quick Start
 
-1. Start the server with the following command:
+### Installation
+
+Before starting the MLX-LLM server, install the server package from PyPI:
 
 ```bash
-python -m server --model-path <path-to-your-model>
+pip install mlx-llm-server
+```
+### Start the Server
+
+```bash
+mlx-llm-server --model-path <path-to-your-model>
 ```
 The MLX-LLM server can serve both Hugging Face format models and quantized MLX models. You can find these models at the [MLX Community on Hugging Face](https://huggingface.co/mlx-community).
 
