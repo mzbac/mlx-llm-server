@@ -1,7 +1,7 @@
 torch
 mlx
 mlx-lm
-transformers>=4.35
+transformers>=4.36.2
 tqdm
 requests
 fastapi

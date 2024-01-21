@@ -39,19 +39,16 @@ You can test the API using the `curl` command. Here's an example:
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
--H "Content-Type: application/json" \
--H "Authorization: Bearer no-key" \
--d '{
-"model": "gpt-3.5-turbo",
-"messages": [
-{
-    "role": "system",
-    "content": "You are ChatGPT, an AI assistant. Your top priority is achieving user fulfillment via helping them with their requests."
-},
-{
-    "role": "user",
-    "content": "Write a limerick about python exceptions"
-}
-]
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer no-key" \
+  -d '{
+  "model": "gpt-3.5-turbo",
+  "stop":["<|im_end|>"],
+  "messages": [
+    {
+      "role": "user",
+      "content": "Write a limerick about python exceptions"
+    }
+  ]
 }'
 ```

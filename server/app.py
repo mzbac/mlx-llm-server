@@ -44,6 +44,7 @@ def get_llama_model():
         if release_outer_lock:
             llama_outer_lock.release()
 
+
 def is_stop_condition_met(
     tokens: List[int],
     stop_id_sequences: List[np.ndarray],
@@ -62,6 +63,7 @@ def is_stop_condition_met(
                 return True, True, len(stop_ids)
 
     return False, False, 0
+
 
 def generate(
     prompt: mx.array,
@@ -98,6 +100,7 @@ def generate(
             break
 
         yield token
+
 
 def convert_chat(
     messages: CompletionRequestMessage, role_mapping: Optional[dict] = None
@@ -138,24 +141,26 @@ def create_app(model_path: str):
     async def chat_completions(
         _: Request,
         body: ChatCompletionRequest,
-        model = Depends(get_llama_model),
+        model=Depends(get_llama_model),
     ):
         chat_id = f"chatcmpl-{uuid.uuid4()}"
-        prompt = convert_chat(body.messages, body.role_mapping)
-        prompt = tokenizer(
-            prompt,
-            return_tensors="np",
-            return_attention_mask=False,
-        )[
-            "input_ids"
-        ][0]
-        prompt = mx.array(prompt)
+        if hasattr(tokenizer, "apply_chat_template") and tokenizer.chat_template:
+            prompt = tokenizer.apply_chat_template(
+                body.messages,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_tensors="np",
+            )
+        else:
+            prompt = convert_chat(body.messages, body.role_mapping)
+            prompt = tokenizer.encode(prompt, return_tensors="np")
+        prompt = mx.array(prompt[0])
         stop_words = body.stop if body.stop else []
         stop_words = [stop_words] if isinstance(stop_words, str) else stop_words
         stop_id_sequences = [
-            tokenizer(stop_word, return_tensors="np", add_special_tokens=False)[
-                "input_ids"
-            ][0]
+            tokenizer.encode(stop_word, return_tensors="np", add_special_tokens=False)[
+                0
+            ]
             for stop_word in stop_words
         ]
         eos_token_id = tokenizer.eos_token_id
