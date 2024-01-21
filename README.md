@@ -1,4 +1,4 @@
-# MLX-LLM
+# mlx-llm-server
 
 This guide will help you set up the MLX-LLM server to serve the model as an OpenAI compatible API.
 
