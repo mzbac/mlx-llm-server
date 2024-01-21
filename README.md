@@ -18,7 +18,7 @@ mlx-llm-server --model-path <path-to-your-model>
 ```
 The MLX-LLM server can serve both Hugging Face format models and quantized MLX models. You can find these models at the [MLX Community on Hugging Face](https://huggingface.co/mlx-community).
 
-## Setup Guide
+## Development Setup Guide
 ### Miniconda Installation
 For Apple Silicon users, install Miniconda natively with these commands:
 ```
