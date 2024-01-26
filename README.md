@@ -18,6 +18,7 @@ mlx-llm-server --model-path <path-to-your-model>
 ```
 ### Arguments
 - `--model-path`: The path to the mlx model weights, tokenizer, and config. This argument is required.
+- `--adapter-file`: (Optional) The path for the trained adapter weights.
 
 ### Host and Port Configuration
 The server will start on the host and port specified by the environment variables `HOST` and `PORT`. If these are not set, it defaults to `127.0.0.1:8080`.
