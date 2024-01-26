@@ -16,6 +16,20 @@ pip install mlx-llm-server
 ```bash
 mlx-llm-server --model-path <path-to-your-model>
 ```
+### Arguments
+- `--model-path`: The path to the mlx model weights, tokenizer, and config. This argument is required.
+
+### Host and Port Configuration
+The server will start on the host and port specified by the environment variables `HOST` and `PORT`. If these are not set, it defaults to `127.0.0.1:8080`.
+
+To start the server on a different host or port, set the `HOST` and `PORT` environment variables before starting the server. For example:
+
+```bash
+export HOST=0.0.0.0
+export PORT=5000
+mlx-llm-server --model-path <path-to-your-model>
+```
+
 The MLX-LLM server can serve both Hugging Face format models and quantized MLX models. You can find these models at the [MLX Community on Hugging Face](https://huggingface.co/mlx-community).
 
 ## Development Setup Guide
