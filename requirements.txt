@@ -1,4 +1,3 @@
-torch
 mlx
 mlx-lm
 transformers>=4.36.2
