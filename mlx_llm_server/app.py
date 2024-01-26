@@ -124,8 +124,8 @@ def convert_chat(
     return prompt.rstrip()
 
 
-def create_app(model_path: str):
-    model, tokenizer = load(model_path)
+def create_app(model_path: str, adapter_file: Optional[str] = None):
+    model, tokenizer = load(model_path, adapter_file=adapter_file)
     set_llama_model(model)
     app = FastAPI()
 

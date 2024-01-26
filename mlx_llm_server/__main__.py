@@ -12,8 +12,13 @@ def main():
         required=True,
         help="The path to the mlx model weights, tokenizer, and config",
     )
+    parser.add_argument(
+        "--adapter-file",
+        type=str,
+        help="The path for the trained adapter weights.",
+    )
     args = parser.parse_args()
-    app = create_app(args.model_path)
+    app = create_app(args.model_path, args.adapter_file)
     uvicorn.run(
         app,
         host=os.getenv("HOST", "127.0.0.1"),
