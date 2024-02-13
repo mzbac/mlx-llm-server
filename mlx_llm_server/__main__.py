@@ -1,13 +1,13 @@
 import argparse
-import uvicorn
 import os
 
-from mlx_llm_server.app import create_app
+from mlx_llm_server.app import run
+
 
 def main():
     parser = argparse.ArgumentParser(description="mlx llama python server.")
     parser.add_argument(
-        "--model-path",
+        "--model",
         type=str,
         required=True,
         help="The path to the mlx model weights, tokenizer, and config",
@@ -18,12 +18,13 @@ def main():
         help="The path for the trained adapter weights.",
     )
     args = parser.parse_args()
-    app = create_app(args.model_path, args.adapter_file)
-    uvicorn.run(
-        app,
-        host=os.getenv("HOST", "127.0.0.1"),
-        port=int(os.getenv("PORT", 8080)),
+    run(
+        os.getenv("HOST", "127.0.0.1"),
+        int(os.getenv("PORT", 8080)),
+        args.model,
+        args.adapter_file,
     )
-    
+
+
 if __name__ == "__main__":
     main()

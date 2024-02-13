@@ -1,68 +1,63 @@
-from threading import Lock
-import time
-from typing import List, Optional, Tuple
-from fastapi import Depends, FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from .types import (
-    ChatCompletionRequest,
-    CompletionRequestMessage,
-    CompletionUsage,
-    CreateChatCompletionResponse,
-    CreateChatCompletionStreamResponse,
-)
-from sse_starlette.sse import EventSourceResponse
 import json
+import time
 import uuid
+from collections import namedtuple
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any, List, Optional
+
 import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
-from mlx_lm import load
+from transformers import PreTrainedTokenizer
 
-_llama_model: Optional[nn.Module] = None
+from mlx_lm.utils import load
 
-llama_outer_lock = Lock()
-llama_inner_lock = Lock()
-
-
-def set_llama_model(model: nn.Module):
-    global _llama_model
-    _llama_model = model
+_model: Optional[nn.Module] = None
+_tokenizer: Optional[PreTrainedTokenizer] = None
 
 
-def get_llama_model():
-    llama_outer_lock.acquire()
-    release_outer_lock = True
-    try:
-        llama_inner_lock.acquire()
-        try:
-            llama_outer_lock.release()
-            release_outer_lock = False
-            yield _llama_model
-        finally:
-            llama_inner_lock.release()
-    finally:
-        if release_outer_lock:
-            llama_outer_lock.release()
+def load_model(model_path: str, adapter_file: Optional[str] = None):
+    global _model
+    global _tokenizer
+    _model, _tokenizer = load(model_path, adapter_file=adapter_file)
 
 
-def is_stop_condition_met(
+StopCondition = namedtuple("StopCondition", ["stop_met", "trim_needed", "trim_length"])
+
+
+def stopping_criteria(
     tokens: List[int],
     stop_id_sequences: List[np.ndarray],
     eos_token_id: int,
     max_tokens: int,
-) -> Tuple[bool, bool, int]:
+) -> StopCondition:
     if len(tokens) >= max_tokens:
-        return True, False, 0
+        return StopCondition(stop_met=True, trim_needed=False, trim_length=0)
 
     if tokens and tokens[-1] == eos_token_id:
-        return True, True, 1
+        return StopCondition(stop_met=True, trim_needed=True, trim_length=1)
 
     for stop_ids in stop_id_sequences:
         if len(tokens) >= len(stop_ids):
             if np.all(np.equal(np.array(tokens[-len(stop_ids) :]), stop_ids)):
-                return True, True, len(stop_ids)
+                return StopCondition(
+                    stop_met=True, trim_needed=True, trim_length=len(stop_ids)
+                )
 
-    return False, False, 0
+    return StopCondition(stop_met=False, trim_needed=False, trim_length=0)
+
+
+def apply_repetition_penalty(
+    logits: mx.array, generated_tokens: List[int], penalty: float
+):
+    if len(generated_tokens) > 0:
+        indices = mx.array([token for token in generated_tokens])
+        selected_logits = logits[:, indices]
+        selected_logits = mx.where(
+            selected_logits < 0, selected_logits * penalty, selected_logits / penalty
+        )
+        logits[:, indices] = selected_logits
+    return logits
 
 
 def generate(
@@ -72,25 +67,60 @@ def generate(
     stop_id_sequences: List[np.ndarray] = None,
     eos_token_id: int = None,
     max_tokens: int = 100,
+    top_p: float = 1.0,
+    repetition_penalty: float = 1.2,
+    repetition_context_size: int = 10,
 ):
     def sample(logits):
         if temp == 0:
             return mx.argmax(logits, axis=-1)
         else:
-            return mx.random.categorical(logits * (1 / temp))
+            if top_p > 0 and top_p < 1.0:
+                if (
+                    logits.dtype == mx.bfloat16
+                ):  # workdaround for unable to load kernel contiguous_scan_inclusive_sum_bfloat16_bfloat16
+                    logits = logits.astype(mx.float32)
+                probs = mx.softmax(logits / temp, axis=-1)
+
+                sorted_probs = mx.sort(probs)[::-1]
+                sorted_indices = mx.argsort(probs)[::-1]
+                cumulative_probs = mx.cumsum(sorted_probs, axis=-1)
+
+                top_probs = mx.where(
+                    cumulative_probs > 1 - top_p,
+                    sorted_probs,
+                    mx.zeros_like(sorted_probs),
+                )
+                sorted_tok = mx.random.categorical(mx.log(top_probs))
+                tok = sorted_indices.squeeze(0)[sorted_tok]
+                return tok
+        return mx.random.categorical(logits * (1 / temp))
 
     y = prompt
     cache = None
     tokens = []
-
+    if repetition_penalty and repetition_penalty > 1.0:
+        repetition_context = [idx.item() for idx in prompt]
+        repetition_context = repetition_context[-repetition_context_size:]
     while True:
         logits, cache = model(y[None], cache=cache)
         logits = logits[:, -1, :]
+
+        if repetition_penalty and repetition_penalty > 1.0:
+            logits = apply_repetition_penalty(
+                logits, repetition_context, repetition_penalty
+            )
+
         y = sample(logits)
         token = y.item()
+        if repetition_penalty and repetition_penalty > 1.0:
+            repetition_context.append(token)
+            if len(repetition_context) > repetition_context_size:
+                repetition_context = repetition_context[-repetition_context_size:]
+
         tokens.append(token)
 
-        stop_met, trim_needed, trim_length = is_stop_condition_met(
+        stop_met, trim_needed, trim_length = stopping_criteria(
             tokens, stop_id_sequences, eos_token_id, max_tokens
         )
         if stop_met:
@@ -102,9 +132,7 @@ def generate(
         yield token
 
 
-def convert_chat(
-    messages: CompletionRequestMessage, role_mapping: Optional[dict] = None
-):
+def convert_chat(messages: any, role_mapping: Optional[dict] = None):
     default_role_mapping = {
         "system_prompt": "A chat between a curious user and an artificial intelligence assistant. The assistant follows the given rules no matter what.",
         "system": "ASSISTANT's RULE: ",
@@ -116,119 +144,170 @@ def convert_chat(
 
     prompt = ""
     for line in messages:
-        role_prefix = role_mapping.get(line.role, "")
+        role_prefix = role_mapping.get(line["role"], "")
         stop = role_mapping.get("stop", "")
-        prompt += f"{role_prefix}{line.content}{stop}"
+        content = line.get("content", "")
+        prompt += f"{role_prefix}{content}{stop}"
 
     prompt += role_mapping.get("assistant", "")
     return prompt.rstrip()
 
 
-def create_app(model_path: str, adapter_file: Optional[str] = None):
-    model, tokenizer = load(model_path, adapter_file=adapter_file)
-    set_llama_model(model)
-    app = FastAPI()
+class APIHandler(BaseHTTPRequestHandler):
+    def _set_headers(self, status_code=200):
+        self.send_response(status_code)
+        self.send_header("Content-type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "*")
+        self.send_header("Access-Control-Allow-Headers", "*")
+        self.end_headers()
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    def do_OPTIONS(self):
+        self._set_headers(204)
 
-    @app.post("/v1/chat/completions")
-    async def chat_completions(
-        _: Request,
-        body: ChatCompletionRequest,
-        model=Depends(get_llama_model),
-    ):
+    def do_POST(self):
+        if self.path == "/v1/chat/completions":
+            content_length = int(self.headers["Content-Length"])
+            post_data = self.rfile.read(content_length)
+            self._set_headers(200)
+
+            response = self.handle_post_request(post_data)
+
+            self.wfile.write(json.dumps(response).encode("utf-8"))
+        else:
+            self._set_headers(404)
+            self.wfile.write(b"Not Found")
+
+    def handle_post_request(self, post_data):
+        body = json.loads(post_data.decode("utf-8"))
         chat_id = f"chatcmpl-{uuid.uuid4()}"
-        if hasattr(tokenizer, "apply_chat_template") and tokenizer.chat_template:
-            prompt = tokenizer.apply_chat_template(
-                body.messages,
+        if hasattr(_tokenizer, "apply_chat_template") and _tokenizer.chat_template:
+            prompt = _tokenizer.apply_chat_template(
+                body["messages"],
                 tokenize=True,
                 add_generation_prompt=True,
                 return_tensors="np",
             )
         else:
-            prompt = convert_chat(body.messages, body.role_mapping)
-            prompt = tokenizer.encode(prompt, return_tensors="np")
+            prompt = convert_chat(body["messages"], body.get("role_mapping"))
+            prompt = _tokenizer.encode(prompt, return_tensors="np")
+
         prompt = mx.array(prompt[0])
-        stop_words = body.stop if body.stop else []
+        stop_words = body.get("stop", [])
         stop_words = [stop_words] if isinstance(stop_words, str) else stop_words
         stop_id_sequences = [
-            tokenizer.encode(stop_word, return_tensors="np", add_special_tokens=False)[
+            _tokenizer.encode(stop_word, return_tensors="np", add_special_tokens=False)[
                 0
             ]
             for stop_word in stop_words
         ]
-        eos_token_id = tokenizer.eos_token_id
-        max_tokens = body.max_tokens
-
-        if body.stream:
-
-            async def event_generator():
-                for token in generate(
-                    prompt,
-                    model,
-                    body.temperature,
-                    stop_id_sequences,
-                    eos_token_id,
-                    max_tokens,
-                ):
-                    s = tokenizer.decode(token)
-                    response = CreateChatCompletionStreamResponse(
-                        id=chat_id,
-                        object="chat.completion.chunk",
-                        created=int(time.time()),
-                        model="gpt-3.5-turbo",
-                        system_fingerprint=f"fp_{uuid.uuid4()}",
-                        choices=[
-                            {
-                                "index": 0,
-                                "delta": {"role": "assistant", "content": s},
-                                "logprobs": None,
-                                "finish_reason": None,
-                            }
-                        ],
-                    )
-
-                    yield f"{json.dumps(response)}"
-
-            return EventSourceResponse(event_generator())
-        else:
+        eos_token_id = _tokenizer.eos_token_id
+        max_tokens = body.get("max_tokens", 100)
+        stream = body.get("stream", False)
+        requested_model = body.get("model", "default_model")
+        temperature = body.get("temperature", 1.0)
+        top_p = body.get("top_p", 1.0)
+        repetition_penalty = body.get("repetition_penalty", 1.0)
+        repetition_context_size = body.get("repetition_context_size", 10)
+        if not stream:
             tokens = list(
                 generate(
                     prompt,
-                    model,
-                    body.temperature,
+                    _model,
+                    temperature,
                     stop_id_sequences,
                     eos_token_id,
                     max_tokens,
+                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
+                    repetition_context_size=repetition_context_size,
                 )
             )
-            s = tokenizer.decode(tokens)
-            response = CreateChatCompletionResponse(
-                id=chat_id,
-                object="chat.completion",
-                created=int(time.time()),
-                model="gpt-3.5-turbo",
-                system_fingerprint=f"fp_{uuid.uuid4()}",
-                choices=[
+            text = _tokenizer.decode(tokens)
+            response = {
+                "id": chat_id,
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": requested_model,
+                "system_fingerprint": f"fp_{uuid.uuid4()}",
+                "choices": [
                     {
                         "index": 0,
-                        "message": {"role": "assistant", "content": s},
+                        "message": {
+                            "role": "assistant",
+                            "content": text,
+                        },
                         "logprobs": None,
                         "finish_reason": None,
                     }
                 ],
-                usage=CompletionUsage(
-                    prompt_tokens=len(prompt),
-                    completion_tokens=len(tokens),
-                    total_tokens=len(prompt) + len(tokens),
-                ),
-            )
-            return f"{json.dumps(response)}"
+                "usage": {
+                    "prompt_tokens": len(prompt),
+                    "completion_tokens": len(tokens),
+                    "total_tokens": len(prompt) + len(tokens),
+                },
+            }
 
-    return app
+            return response
+        else:
+            self.send_response(200)
+            self.send_header("Content-type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            accumulated_tokens = []
+            current_generated_text_index = 0
+            for token in generate(
+                prompt,
+                _model,
+                temperature,
+                stop_id_sequences,
+                eos_token_id,
+                max_tokens,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                repetition_context_size=repetition_context_size,
+            ):
+                # This is a workaround because the llama tokenizer omitted spaces during decoding token by token.
+                accumulated_tokens.append(token)
+                generated_text = _tokenizer.decode(accumulated_tokens)
+                next_chunk = generated_text[current_generated_text_index:]
+                current_generated_text_index = len(generated_text)
+                response = {
+                    "id": chat_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": requested_model,
+                    "system_fingerprint": f"fp_{uuid.uuid4()}",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"role": "assistant", "content": next_chunk},
+                            "logprobs": None,
+                            "finish_reason": None,
+                        }
+                    ],
+                }
+                try:
+                    self.wfile.write(f"data: {json.dumps(response)}\n\n".encode())
+                    self.wfile.flush()
+                except Exception as e:
+                    print(e)
+                    break
+
+            self.wfile.write(f"data: [DONE]\n\n".encode())
+            self.wfile.flush()
+
+
+def run(
+    host: str,
+    port: int,
+    model: str,
+    adapter_file: str,
+    server_class=HTTPServer,
+    handler_class=APIHandler,
+):
+    load_model(model, adapter_file=adapter_file)
+    server_address = (host, port)
+    httpd = server_class(server_address, handler_class)
+    print(f"Starting httpd at {host} on port {port}...")
+    httpd.serve_forever()

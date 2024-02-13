@@ -11,7 +11,7 @@ with open(this_directory / "requirements.txt") as fid:
 
 setuptools.setup(
     name="mlx-llm-server",
-    version="0.1.5",
+    version="0.1.6",
     author="anchen",
     author_email="li.anchen.au@gmail.com",
     description="server to serve mlx model as an OpenAI compatible API",
@@ -24,8 +24,8 @@ setuptools.setup(
     packages=setuptools.find_packages(where="."),
     python_requires=">=3.10",
     entry_points={
-        'console_scripts': [
-            'mlx-llm-server=mlx_llm_server.__main__:main',  
+        "console_scripts": [
+            "mlx-llm-server=mlx_llm_server.__main__:main",
         ],
     },
 )

@@ -14,10 +14,10 @@ pip install mlx-llm-server
 ### Start the Server
 
 ```bash
-mlx-llm-server --model-path <path-to-your-model>
+mlx-llm-server --model <path-to-your-model>
 ```
 ### Arguments
-- `--model-path`: The path to the mlx model weights, tokenizer, and config. This argument is required.
+- `--model`: The path to the mlx model weights, tokenizer, and config. This argument is required.
 - `--adapter-file`: (Optional) The path for the trained adapter weights.
 
 ### Host and Port Configuration
@@ -28,10 +28,28 @@ To start the server on a different host or port, set the `HOST` and `PORT` envir
 ```bash
 export HOST=0.0.0.0
 export PORT=5000
-mlx-llm-server --model-path <path-to-your-model>
+mlx-llm-server --model <path-to-your-model>
 ```
 
 The MLX-LLM server can serve both Hugging Face format models and quantized MLX models. You can find these models at the [MLX Community on Hugging Face](https://huggingface.co/mlx-community).
+
+## API Spec
+## API Endpoint: `/v1/chat/completions`
+### Method: `POST`
+### Request Headers
+- `Content-Type`: Must be `application/json`.
+
+### Request Body (JSON)
+- `messages`: An array of message objects representing the conversation history. Each message object should have a `role` (e.g., `user`, `assistant`) and `content` (the message text).
+- `role_mapping`: (Optional) A dictionary to customize the role prefixes in the generated prompt. If not provided, default mappings are used.
+- `stop`: (Optional) An array of strings or a single string representing stopping conditions for the generation. These are sequences of tokens where the generation should stop.
+- `max_tokens`: (Optional) An integer specifying the maximum number of tokens to generate. Defaults to 100.
+- `stream`: (Optional) A boolean indicating if the response should be streamed. If `true`, responses are sent as they are generated. Defaults to `false`.
+- `model`: (Optional) A string specifying the model to use for generation. This is not utilized in the provided code but could be used for selecting among multiple models.
+- `temperature`: (Optional) A float specifying the sampling temperature. Defaults to 1.0.
+- `top_p`: (Optional) A float specifying the nucleus sampling parameter. Defaults to 1.0.
+- `repetition_penalty`: Optional. Applies a penalty to repeated tokens.
+- `repetition_context_size`: Optional. The size of the context window for applying repetition penalty.
 
 ## Development Setup Guide
 ### Miniconda Installation
