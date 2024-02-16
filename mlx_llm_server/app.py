@@ -3,7 +3,7 @@ import time
 import uuid
 from collections import namedtuple
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, List, Optional
+from typing import List, Optional
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -22,29 +22,23 @@ def load_model(model_path: str, adapter_file: Optional[str] = None):
     _model, _tokenizer = load(model_path, adapter_file=adapter_file)
 
 
-StopCondition = namedtuple("StopCondition", ["stop_met", "trim_needed", "trim_length"])
+StopCondition = namedtuple("StopCondition", ["stop_met", "trim_length"])
 
 
 def stopping_criteria(
     tokens: List[int],
     stop_id_sequences: List[np.ndarray],
     eos_token_id: int,
-    max_tokens: int,
 ) -> StopCondition:
-    if len(tokens) >= max_tokens:
-        return StopCondition(stop_met=True, trim_needed=False, trim_length=0)
-
     if tokens and tokens[-1] == eos_token_id:
-        return StopCondition(stop_met=True, trim_needed=True, trim_length=1)
+        return StopCondition(stop_met=True, trim_length=0)
 
     for stop_ids in stop_id_sequences:
         if len(tokens) >= len(stop_ids):
             if np.all(np.equal(np.array(tokens[-len(stop_ids) :]), stop_ids)):
-                return StopCondition(
-                    stop_met=True, trim_needed=True, trim_length=len(stop_ids)
-                )
+                return StopCondition(stop_met=True, trim_length=len(stop_ids))
 
-    return StopCondition(stop_met=False, trim_needed=False, trim_length=0)
+    return StopCondition(stop_met=False, trim_length=0)
 
 
 def apply_repetition_penalty(
@@ -64,9 +58,6 @@ def generate(
     prompt: mx.array,
     model: nn.Module,
     temp: float = 0.0,
-    stop_id_sequences: List[np.ndarray] = None,
-    eos_token_id: int = None,
-    max_tokens: int = 100,
     top_p: float = 1.0,
     repetition_penalty: float = 1.2,
     repetition_context_size: int = 10,
@@ -98,9 +89,8 @@ def generate(
 
     y = prompt
     cache = None
-    tokens = []
     if repetition_penalty and repetition_penalty > 1.0:
-        repetition_context = [idx.item() for idx in prompt]
+        repetition_context = prompt.tolist()
         repetition_context = repetition_context[-repetition_context_size:]
     while True:
         logits, cache = model(y[None], cache=cache)
@@ -117,18 +107,6 @@ def generate(
             repetition_context.append(token)
             if len(repetition_context) > repetition_context_size:
                 repetition_context = repetition_context[-repetition_context_size:]
-
-        tokens.append(token)
-
-        stop_met, trim_needed, trim_length = stopping_criteria(
-            tokens, stop_id_sequences, eos_token_id, max_tokens
-        )
-        if stop_met:
-            if trim_needed and trim_length > 0:
-                tokens = tokens[:-trim_length]
-            tokens = None
-            break
-
         yield token
 
 
@@ -151,6 +129,53 @@ def convert_chat(messages: any, role_mapping: Optional[dict] = None):
 
     prompt += role_mapping.get("assistant", "")
     return prompt.rstrip()
+
+
+def create_response(chat_id, requested_model, prompt, tokens, text):
+    response = {
+        "id": chat_id,
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": requested_model,
+        "system_fingerprint": f"fp_{uuid.uuid4()}",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": text,
+                },
+                "logprobs": None,
+                "finish_reason": None,
+            }
+        ],
+        "usage": {
+            "prompt_tokens": len(prompt),
+            "completion_tokens": len(tokens),
+            "total_tokens": len(prompt) + len(tokens),
+        },
+    }
+
+    return response
+
+
+def create_chunk_response(chat_id, requested_model, next_chunk):
+    response = {
+        "id": chat_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": requested_model,
+        "system_fingerprint": f"fp_{uuid.uuid4()}",
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"role": "assistant", "content": next_chunk},
+                "logprobs": None,
+                "finish_reason": None,
+            }
+        ],
+    }
+    return response
 
 
 class APIHandler(BaseHTTPRequestHandler):
@@ -201,6 +226,9 @@ class APIHandler(BaseHTTPRequestHandler):
             ]
             for stop_word in stop_words
         ]
+        max_stop_id_sequence_len = (
+            max(len(seq) for seq in stop_id_sequences) if stop_id_sequences else 0
+        )
         eos_token_id = _tokenizer.eos_token_id
         max_tokens = body.get("max_tokens", 100)
         stream = body.get("stream", False)
@@ -210,92 +238,87 @@ class APIHandler(BaseHTTPRequestHandler):
         repetition_penalty = body.get("repetition_penalty", 1.0)
         repetition_context_size = body.get("repetition_context_size", 10)
         if not stream:
-            tokens = list(
+            tokens = []
+            for token, _ in zip(
                 generate(
                     prompt,
                     _model,
                     temperature,
-                    stop_id_sequences,
-                    eos_token_id,
-                    max_tokens,
                     top_p=top_p,
                     repetition_penalty=repetition_penalty,
                     repetition_context_size=repetition_context_size,
+                ),
+                range(max_tokens),
+            ):
+                tokens.append(token)
+                stop_condition = stopping_criteria(
+                    tokens, stop_id_sequences, eos_token_id
                 )
-            )
-            text = _tokenizer.decode(tokens)
-            response = {
-                "id": chat_id,
-                "object": "chat.completion",
-                "created": int(time.time()),
-                "model": requested_model,
-                "system_fingerprint": f"fp_{uuid.uuid4()}",
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": text,
-                        },
-                        "logprobs": None,
-                        "finish_reason": None,
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": len(prompt),
-                    "completion_tokens": len(tokens),
-                    "total_tokens": len(prompt) + len(tokens),
-                },
-            }
+                if stop_condition.stop_met:
+                    if stop_condition.trim_length:
+                        tokens = tokens[: -stop_condition.trim_length]
+                    break
 
-            return response
+            text = _tokenizer.decode(tokens)
+            return create_response(chat_id, requested_model, prompt, tokens, text)
         else:
             self.send_response(200)
             self.send_header("Content-type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
-            accumulated_tokens = []
+            tokens = []
             current_generated_text_index = 0
+            stop_sequence_buffer = []
             REPLACEMENT_CHAR = "\ufffd"
-            for token in generate(
-                prompt,
-                _model,
-                temperature,
-                stop_id_sequences,
-                eos_token_id,
-                max_tokens,
-                top_p=top_p,
-                repetition_penalty=repetition_penalty,
-                repetition_context_size=repetition_context_size,
+            for token, _ in zip(
+                generate(
+                    prompt,
+                    _model,
+                    temperature,
+                    top_p=top_p,
+                    repetition_penalty=repetition_penalty,
+                    repetition_context_size=repetition_context_size,
+                ),
+                range(max_tokens),
             ):
-                # This is a workaround because the llama tokenizer omitted spaces during decoding token by token.
-                accumulated_tokens.append(token)
-                if REPLACEMENT_CHAR in _tokenizer.decode(token):
-                    continue
-                generated_text = _tokenizer.decode(accumulated_tokens)
+                tokens.append(token)
+                stop_sequence_buffer.append(token)
+                if len(stop_sequence_buffer) >= max_stop_id_sequence_len:
+                    if REPLACEMENT_CHAR in _tokenizer.decode(token):
+                        continue
+                    stop_condition = stopping_criteria(
+                        stop_sequence_buffer,
+                        stop_id_sequences,
+                        eos_token_id,
+                    )
+                    if stop_condition.stop_met:
+                        if stop_condition.trim_length:
+                            tokens = tokens[: -stop_condition.trim_length]
+                        break
+                    generated_text = _tokenizer.decode(tokens)
+                    next_chunk = generated_text[current_generated_text_index:]
+                    current_generated_text_index = len(generated_text)
+
+                    response = create_chunk_response(
+                        chat_id, requested_model, next_chunk
+                    )
+                    try:
+                        self.wfile.write(f"data: {json.dumps(response)}\n\n".encode())
+                        self.wfile.flush()
+                        stop_sequence_buffer = []
+                    except Exception as e:
+                        print(e)
+                        break
+
+            if stop_sequence_buffer:
+                generated_text = _tokenizer.decode(tokens)
                 next_chunk = generated_text[current_generated_text_index:]
-                current_generated_text_index = len(generated_text)
-                response = {
-                    "id": chat_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": requested_model,
-                    "system_fingerprint": f"fp_{uuid.uuid4()}",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {"role": "assistant", "content": next_chunk},
-                            "logprobs": None,
-                            "finish_reason": None,
-                        }
-                    ],
-                }
+                response = create_chunk_response(chat_id, requested_model, next_chunk)
                 try:
                     self.wfile.write(f"data: {json.dumps(response)}\n\n".encode())
                     self.wfile.flush()
                 except Exception as e:
                     print(e)
-                    break
 
             self.wfile.write(f"data: [DONE]\n\n".encode())
             self.wfile.flush()
