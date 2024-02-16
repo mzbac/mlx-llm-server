@@ -283,7 +283,7 @@ class APIHandler(BaseHTTPRequestHandler):
             ):
                 tokens.append(token)
                 stop_sequence_buffer.append(token)
-                if len(stop_sequence_buffer) >= max_stop_id_sequence_len:
+                if len(stop_sequence_buffer) > max_stop_id_sequence_len:
                     if REPLACEMENT_CHAR in _tokenizer.decode(token):
                         continue
                     stop_condition = stopping_criteria(
