@@ -14,12 +14,14 @@ from mlx_lm.utils import load
 
 _model: Optional[nn.Module] = None
 _tokenizer: Optional[PreTrainedTokenizer] = None
-
+_model_id: Optional[str] = None
 
 def load_model(model_path: str, adapter_file: Optional[str] = None):
     global _model
     global _tokenizer
+    global _model_id
     _model, _tokenizer = load(model_path, adapter_file=adapter_file)
+    _model_id = model_path
 
 
 StopCondition = namedtuple("StopCondition", ["stop_met", "trim_length"])
@@ -189,7 +191,12 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self._set_headers(204)
-
+    def do_GET(self):
+            if self.path == "/v1/models":
+                self._handle_get_models()
+            else:
+                self._set_headers(404)
+                self.wfile.write(b"Not Found")
     def do_POST(self):
         if self.path == "/v1/chat/completions":
             content_length = int(self.headers["Content-Length"])
@@ -323,6 +330,13 @@ class APIHandler(BaseHTTPRequestHandler):
             self.wfile.write(f"data: [DONE]\n\n".encode())
             self.wfile.flush()
 
+    def _handle_get_models(self):
+        self._set_headers(200)
+        response = {
+            "object": "list",
+            "data": [{"id": _model_id, "object": "model", "owned_by": "me", "permissions": []}],
+        }
+        self.wfile.write(json.dumps(response).encode("utf-8"))
 
 def run(
     host: str,
