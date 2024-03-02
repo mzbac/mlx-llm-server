@@ -334,7 +334,7 @@ class APIHandler(BaseHTTPRequestHandler):
         self._set_headers(200)
         response = {
             "object": "list",
-            "data": [{"id": _model_id, "object": "model", "owned_by": "me", "permissions": []}],
+            "data": [{"id": _model_id, "object": "model", "owned_by": "me", "created": int(time.time())}],
         }
         self.wfile.write(json.dumps(response).encode("utf-8"))
 
