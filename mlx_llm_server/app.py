@@ -75,8 +75,9 @@ def generate(
                     logits = logits.astype(mx.float32)
                 probs = mx.softmax(logits / temp, axis=-1)
 
-                sorted_probs = mx.sort(probs)[::-1]
-                sorted_indices = mx.argsort(probs)[::-1]
+                sorted_indices = mx.argsort(probs)
+                sorted_probs = probs[..., sorted_indices].squeeze(0)
+
                 cumulative_probs = mx.cumsum(sorted_probs, axis=-1)
 
                 top_probs = mx.where(
